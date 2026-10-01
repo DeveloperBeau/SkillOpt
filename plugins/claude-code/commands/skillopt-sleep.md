@@ -1,6 +1,6 @@
 ---
 description: Run or manage the SkillOpt-Sleep self-evolution cycle (review past sessions, replay tasks through a selected backend, consolidate validated memory + skills, or schedule nightly runs)
-argument-hint: "[run | dry-run | status | adopt | harvest | schedule | unschedule] (default: status)"
+argument-hint: "[discover | run | dry-run | status | adopt | harvest | schedule | unschedule] (default: status)"
 allowed-tools: Bash, Read
 ---
 
@@ -34,9 +34,10 @@ or `--target-skill-path`) instead of silently dropping them:
 | action       | what it does |
 |--------------|--------------|
 | `status`     | show how many nights have run + the latest staged proposal (READ-ONLY) |
+| `discover`   | read-only inventory of guidance, skills, and linked prompts; supports --project-only and --match |
 | `dry-run`    | harvest → mine → replay → report, but **stage nothing** (no-staging preview) |
 | `run`        | full cycle: **stage** a validation report and any accepted proposal; only explicit `--auto-adopt` may also update live files |
-| `adopt`      | apply the latest staged proposal to live `CLAUDE.md` / `SKILL.md` (backs up first) |
+| `adopt`      | apply the exact reviewed --staging NIGHT proposal to its pinned live targets (backs up first) |
 | `harvest`    | debug: print the recurring tasks mined from recent sessions |
 | `schedule`   | install a nightly cron entry for this project (`--hour --minute`, off-:00 by default) |
 | `unschedule` | remove the nightly cron entry (`--all` to remove every managed entry) |
@@ -49,7 +50,14 @@ what the optimizer writes, add `--preferences "<your house rules>"`.
 
 ## Steps to follow
 
-1. **Run the requested action** via the bundled runner above. Capture stdout and
+1. For learning requests, first run `discover --project "$(pwd)" --json`.
+   Select relevant writable records; use `--target-document-path` for guidance,
+   pipelines, or stages. `--memory-path` supports discovered `CLAUDE.local.md`;
+   `--no-memory` keeps shared prompt runs independent of project memory.
+   Generated copies are read-only: locate explicit editable source instead.
+   Project lessons use invoked scope; shared lessons may use all scope.
+   Start with a bounded mock dry-run. Optimize selected documents separately.
+   **Run the requested action** via the bundled runner above. Capture stdout and
    stderr.
 2. **For `run`:** if it prints a staging directory, `Read` its `report.md` and
    show the user:
@@ -61,8 +69,8 @@ what the optimizer writes, add `--preferences "<your house rules>"`.
    machine-readable output is useful).
 4. **For `run` that produced an accepted proposal:** inspect whether stdout says
    it was auto-adopted. If not, tell the user nothing live changed, run or cite
-   `status`, and offer the exact reviewed mode: `adopt --legacy`, repeatable
-   `adopt --skill NAME`, or `adopt --all-skills`. Never imply that bare adopt
+   `status`, and offer the exact reviewed night and mode: `adopt --staging NIGHT --legacy`, repeatable
+   `adopt --staging NIGHT --skill NAME`, or `adopt --staging NIGHT --all-skills`. Never imply that bare adopt
    means “adopt everything.” If it was auto-adopted, report the updated paths
    and any still-pending fan-out names explicitly.
 5. **For `adopt`:** confirm which live files were updated and that backups were

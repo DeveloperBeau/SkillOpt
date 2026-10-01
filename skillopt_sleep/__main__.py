@@ -130,8 +130,15 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                    help="cap harvested sessions before mining; default derives from max tasks")
     p.add_argument("--max-tasks", type=int, default=0,
                    help="cap mined tasks for this run")
-    p.add_argument("--target-skill-path", default="",
+    targets = p.add_mutually_exclusive_group()
+    targets.add_argument("--target-skill-path", default="",
                    help="explicit live SKILL.md path to evolve/stage/adopt")
+    targets.add_argument("--target-document-path", default="",
+                   help="explicit Markdown instruction path to evolve/stage/adopt")
+    p.add_argument("--memory-path", default="",
+                   help="project-relative or absolute Markdown memory path (default: CLAUDE.md)")
+    p.add_argument("--no-memory", action="store_true",
+                   help="disable secondary memory proposals")
     p.add_argument(
         "--skill-root",
         dest="skill_roots",
@@ -205,7 +212,17 @@ def _cfg_from_args(args, task_meta: Dict[str, Any] | None = None) -> Any:
         overrides["max_sessions_per_night"] = args.max_sessions
     if getattr(args, "max_tasks", 0):
         overrides["max_tasks_per_night"] = args.max_tasks
-    target_skill_path = getattr(args, "target_skill_path", "")
+    document_path = getattr(args, "target_document_path", "")
+    if not document_path and not getattr(args, "target_skill_path", "") and task_meta:
+        document_path = str(task_meta.get("target_document_path") or "")
+    target_skill_path = document_path or getattr(args, "target_skill_path", "")
+    memory_path = getattr(args, "memory_path", "") or (str(task_meta.get("memory_path") or "") if task_meta else "")
+    if document_path or memory_path:
+        overrides["document_targets"] = True
+    if memory_path:
+        overrides["memory_path"] = memory_path
+    if getattr(args, "no_memory", False) or task_meta and task_meta.get("evolve_memory") is False:
+        overrides["evolve_memory"] = False
     if not target_skill_path and task_meta:
         target_skill_path = str(task_meta.get("target_skill_path") or "")
     if target_skill_path:
@@ -267,6 +284,29 @@ def cmd_run(args, dry: bool = False) -> int:
         _print_run_failure(args, "staging_refused", exc)
         return 1
     _print_run_report(outcome, args, task_meta)
+    return 0
+
+
+def cmd_discover(args) -> int:
+    """Inventory instruction targets without harvesting or creating state."""
+    from skillopt_sleep.discovery import discover_documents
+    documents = discover_documents(_cfg_from_args(args))
+    if getattr(args, "match", ""):
+        needle = args.match.casefold()
+        documents = [row for row in documents if needle in row["path"].casefold()
+                     or needle in row["discovered_from"].casefold()]
+    if getattr(args, "project_only", False):
+        project = os.path.realpath(args.project or os.getcwd())
+        documents = [row for row in documents
+                     if os.path.commonpath([project, os.path.realpath(row["path"])]) == project]
+    if args.json:
+        print(json.dumps({"documents": documents}, ensure_ascii=False, indent=2))
+    else:
+        for document in documents:
+            mode = "writable" if document["writable"] else "read-only"
+            print(f"[{document['kind']}/{mode}] {_display_value(document['path'])}")
+            if document.get("reason"):
+                print(f"  {_display_value(document['reason'])}")
     return 0
 
 
@@ -480,6 +520,10 @@ def _handoff_mine_and_pin(cfg, args, backend, snapshot: str, dry: bool):
         n_sessions=len(digests),
         target_skill_path=target_skill_path,
     )
+    if cfg.get("document_targets", False):
+        payload.update(target_document_path=target_skill_path,
+                       memory_path=cfg.managed_memory_path(),
+                       evolve_memory=bool(cfg.get("evolve_memory", True)))
     # NOT marked reviewed: feeding this snapshot back through --tasks-file
     # with a real backend must still hit the human-review gate above. The
     # driver itself loads it directly, with the same trust as in-cycle mining.
@@ -875,6 +919,10 @@ def main(argv=None) -> int:
     p_harvest = sub.add_parser("harvest", help="debug: show mined tasks")
     _add_common(p_harvest)
     p_harvest.add_argument("--output", default="", help="write mined tasks JSON for review")
+    p_discover = sub.add_parser("discover", help="read-only inventory of guidance, skills, and linked prompts")
+    _add_common(p_discover)
+    p_discover.add_argument("--match", default="", help="filter inventory by path or referring document text")
+    p_discover.add_argument("--project-only", action="store_true", help="show only documents inside the invoked project")
     p_sched = sub.add_parser("schedule", help="install a nightly cron entry for this project")
     _add_common(p_sched)
     p_sched.add_argument("--hour", type=int, default=3)
@@ -907,6 +955,8 @@ def main(argv=None) -> int:
         return cmd_adopt(args)
     if args.cmd == "harvest":
         return cmd_harvest(args)
+    if args.cmd == "discover":
+        return cmd_discover(args)
     if args.cmd == "schedule":
         return cmd_schedule(args)
     if args.cmd == "unschedule":

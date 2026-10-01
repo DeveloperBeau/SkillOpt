@@ -75,6 +75,8 @@ DEFAULTS: Dict[str, Any] = {
     "evolve_skill": True,         # consolidate the managed SKILL.md
     "llm_mine": True,             # use the backend to mine checkable tasks (real backends)
     "target_skill_path": "",      # explicit SKILL.md target for repo-scoped agents
+    "document_targets": False,    # explicitly selected Markdown instruction targets
+    "memory_path": "CLAUDE.md",   # project-relative or absolute secondary guidance target
     "skill_roots": [],            # extra explicit roots containing <name>/SKILL.md
     "target_task_filter": True,   # prefer mined tasks matching target_skill_path/text
     "progress": False,            # print phase progress to stderr
@@ -190,6 +192,12 @@ class SleepConfig:
         return os.path.join(
             self.skills_dir, self.data["managed_skill_name"], "SKILL.md"
         )
+
+    def managed_memory_path(self) -> str:
+        target = os.path.expanduser(str(self.data.get("memory_path") or "CLAUDE.md"))
+        if not os.path.isabs(target):
+            target = os.path.join(self.data.get("invoked_project") or os.getcwd(), target)
+        return os.path.abspath(target)
 
 
 def _user_config_path() -> Optional[str]:

@@ -27,7 +27,6 @@ from skillopt_sleep.evidence import EvidenceLog
 from skillopt_sleep.harvest_sources import harvest_for_config
 from skillopt_sleep.memory import ensure_skill_scaffold
 from skillopt_sleep.mine import group_tasks_by_skill_hint, mine
-from skillopt_sleep.replay import aggregate_scores, replay_batch
 from skillopt_sleep.multi_skill import (
     SKIPPED,
     GroupConsolidation,
@@ -36,6 +35,7 @@ from skillopt_sleep.multi_skill import (
     consolidate_groups,
     skill_group_reports,
 )
+from skillopt_sleep.replay import aggregate_scores, replay_batch
 from skillopt_sleep.skill_resolver import resolve_skill, skill_search_roots
 from skillopt_sleep.staging import (
     SkillProposal,
@@ -302,10 +302,15 @@ def _render_report_md(report: SleepReport, cfg: SleepConfig) -> str:
     backend = _markdown_text(cfg.get("backend"))
     replay = _markdown_text(cfg.get("replay_mode"))
     gate_action = _markdown_text(report.gate_action)
+    primary_target = cfg.managed_skill_path() if isinstance(cfg, SleepConfig) else cfg.get("target_skill_path", "")
+    memory_target = cfg.managed_memory_path() if isinstance(cfg, SleepConfig) else cfg.get("memory_path", "CLAUDE.md")
     lines = [
         f"# SkillOpt-Sleep — night {report.night} report",
         "",
         f"- project: `{project}`",
+        f"- primary target: `{_markdown_text(primary_target)}`",
+        f"- memory target: `{_markdown_text(memory_target)}` "
+        f"({'enabled' if cfg.get('evolve_memory', True) else 'disabled'})",
         f"- backend: `{backend}`  replay: `{replay}`",
         f"- sessions harvested: {report.n_sessions}",
         f"- tasks mined: {report.n_tasks}  (replayed: {report.n_replayed})",
@@ -706,8 +711,15 @@ def run_sleep_cycle(
                config=cycle_config)
 
     # ── live skill/memory docs ───────────────────────────────────────────
-    live_memory_path = os.path.join(project, "CLAUDE.md")
+    live_memory_path = cfg.managed_memory_path()
     live_skill_path = cfg.managed_skill_path()
+    harvest_key = project
+    if cfg.get("document_targets", False):
+        # Each prompt/source/scope needs its own cursor: optimizing one stage
+        # must not consume the history needed to optimize the next stage.
+        cursor_context = repr((live_skill_path, live_memory_path,
+                               cfg.get("transcript_source"), cfg.get("projects")))
+        harvest_key += "#document:" + hashlib.sha256(cursor_context.encode()).hexdigest()
     _progress(cfg, f"live skill: {live_skill_path}")
     (
         raw_skill,
@@ -720,7 +732,7 @@ def run_sleep_cycle(
         live_memory_sha256,
         live_memory_realpath,
     ) = _read_live_baseline(live_memory_path, "memory")
-    if not skill:
+    if not skill and (not cfg.get("document_targets", False) or os.path.basename(live_skill_path) == "SKILL.md"):
         skill = ensure_skill_scaffold(
             "", name=cfg.get("managed_skill_name", "skillopt-sleep-learned"),
             description="Preferences and procedures learned from past local agent sessions.",
@@ -738,7 +750,7 @@ def run_sleep_cycle(
         n_sessions = 0
         _progress(cfg, f"using {len(tasks)} seeded tasks")
     else:
-        since = state.last_harvest_for(project)
+        since = state.last_harvest_for(harvest_key)
         # On first run (no prior harvest), apply lookback_hours so we don't
         # scan the entire transcript history and trigger massive LLM mining.
         if since is None:
@@ -832,7 +844,7 @@ def run_sleep_cycle(
     if not tasks:
         report.ended_at = _now_iso(clock)
         report.notes.append("no tasks mined — nothing to consolidate")
-        state.set_last_harvest(project, started)
+        state.set_last_harvest(harvest_key, started)
         state.record_night({"night": night, "accepted": False, "n_tasks": 0})
         if not dry_run:
             state.save()
@@ -1031,6 +1043,7 @@ def run_sleep_cycle(
             out_dir=staging_dir_pre,
             skill_proposals=skill_proposals,
             skill_roots=skill_search_roots(cfg) if skill_proposals else (),
+            document_targets=bool(cfg.get("document_targets", False)),
         )
         if ev is not None:
             ev.log("stage", "staged", staging_dir=staging_dir,
@@ -1079,7 +1092,7 @@ def run_sleep_cycle(
                 )
         except Exception:
             pass
-        state.set_last_harvest(project, started)
+        state.set_last_harvest(harvest_key, started)
         state.record_night({
             "night": night, "accepted": result.accepted,
             "baseline": result.baseline_score, "candidate": result.candidate_score,

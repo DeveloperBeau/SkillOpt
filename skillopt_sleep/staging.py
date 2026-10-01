@@ -747,6 +747,28 @@ def _prepare_skill_proposals(
     return materialized, rows
 
 
+def _markdown_basename(value: object) -> bool:
+    """Only one safe Markdown path segment can identify a document target."""
+    return (
+        isinstance(value, str)
+        and bool(_safe_skill_name(value))
+        and os.path.splitext(value)[1].lower() == ".md"
+    )
+
+
+def _legacy_target_basename(label: str, row: Dict[str, Any]) -> str:
+    default = "SKILL.md" if label == "skill" else "CLAUDE.md"
+    kind = row.get("target_kind", "legacy")
+    if kind == "legacy":
+        return default
+    if kind != "markdown":
+        raise StagingError(f"legacy {label} has an invalid target kind")
+    basename = row.get("live_basename")
+    if not _markdown_basename(basename):
+        raise StagingError(f"legacy {label} target must be a Markdown file")
+    return basename
+
+
 def _prepare_legacy_proposal(
     *,
     label: str,
@@ -755,6 +777,7 @@ def _prepare_legacy_proposal(
     live_path: str,
     live_sha256: Optional[str],
     live_realpath: str,
+    document_targets: bool = False,
 ) -> Dict[str, Any]:
     """Validate and pin one legacy SKILL.md/CLAUDE.md proposal."""
     if not isinstance(proposed_text, str) or (
@@ -765,7 +788,10 @@ def _prepare_legacy_proposal(
     canonical = _canonical_live_path(requested) if requested else ""
     if not canonical:
         raise StagingError(f"unsafe legacy {label} live path: {live_path!r}")
-    expected_basename = "SKILL.md" if label == "skill" else "CLAUDE.md"
+    basename = os.path.basename(canonical)
+    if document_targets and not _markdown_basename(basename):
+        raise StagingError(f"legacy {label} target must be a Markdown file: {canonical}")
+    expected_basename = basename if document_targets else ("SKILL.md" if label == "skill" else "CLAUDE.md")
     if os.path.basename(canonical) != expected_basename:
         raise StagingError(
             f"legacy {label} target must be {expected_basename}: {canonical}"
@@ -791,13 +817,16 @@ def _prepare_legacy_proposal(
         raise StagingError(
             f"legacy {label} changed during consolidation; discard and rerun this night"
         )
-    return {
+    row = {
         "proposed_file": proposed_file,
         "live_path": canonical,
         "sha256": _sha256_text(proposed_text),
         "live_sha256": expected_sha256,
         "live_realpath": actual_realpath,
     }
+    if document_targets:
+        row.update(target_kind="markdown", live_basename=basename)
+    return row
 
 
 def write_skill_proposals(
@@ -1007,6 +1036,7 @@ def write_staging(
     out_dir: str = "",
     skill_proposals: Iterable[SkillProposal] = (),
     skill_roots: Iterable[str] = (),
+    document_targets: bool = False,
 ) -> str:
     """Write proposals + report into staging/<ts>/ and return that path.
 
@@ -1060,6 +1090,7 @@ def write_staging(
             live_path=live_skill_path,
             live_sha256=live_skill_sha256,
             live_realpath=live_skill_realpath,
+            document_targets=document_targets,
         )
         live_skill_path = legacy["skill"]["live_path"]
     if proposed_memory is not None:
@@ -1070,8 +1101,16 @@ def write_staging(
             live_path=live_memory_path,
             live_sha256=live_memory_sha256,
             live_realpath=live_memory_realpath,
+            document_targets=document_targets,
         )
         live_memory_path = legacy["memory"]["live_path"]
+
+    if "skill" in legacy and "memory" in legacy:
+        a, b = legacy["skill"]["live_path"], legacy["memory"]["live_path"]
+        if _filesystem_key(a) == _filesystem_key(b) or (
+            os.path.exists(a) and os.path.exists(b) and os.path.samefile(a, b)
+        ):
+            raise StagingError("managed skill and memory proposals target the same live file")
 
     manifest = {
         "schema": _MANIFEST_SCHEMA,
@@ -2048,7 +2087,7 @@ def _decode_wal_targets(
         seen_live_collisions.add(collision_key)
         if _path_identity_key(expected_realpath) != live_key:
             raise StagingError("adoption recovery journal target identity is invalid")
-        if expected_basename not in {"SKILL.md", "CLAUDE.md"}:
+        if not _markdown_basename(expected_basename) or os.path.basename(live) != expected_basename:
             raise StagingError("adoption recovery journal has an unsafe target basename")
         if not _valid_sha256_pin(proposed_sha256):
             raise StagingError("adoption recovery journal has an invalid proposal hash")
@@ -2105,9 +2144,11 @@ def _decode_wal_targets(
             ):
                 raise StagingError("adoption recovery journal skill target is invalid")
         else:
-            label = "skill" if expected_basename == "SKILL.md" else "memory"
+            label = key.removeprefix("legacy ")
+            if label not in {"skill", "memory"}:
+                raise StagingError("adoption recovery journal legacy target is invalid")
             expected_key = f"legacy {label}"
-            expected_backup = os.path.join(staging_dir, "backup", expected_basename)
+            expected_backup = os.path.join(staging_dir, "backup", "SKILL.md" if label == "skill" else "CLAUDE.md")
             if key != expected_key:
                 raise StagingError("adoption recovery journal legacy target is invalid")
         derived_backup = expected_backup if original is not None else ""
@@ -2990,10 +3031,9 @@ def _read_legacy_receipts(
         if label not in {"skill", "memory"} or label in seen:
             raise StagingError("existing legacy adoption receipt is invalid")
         seen.add(label)
-        expected_basename = "SKILL.md" if label == "skill" else "CLAUDE.md"
         if (
             not live
-            or os.path.basename(live) != expected_basename
+            or not _markdown_basename(os.path.basename(live))
             or (before != "" and not _valid_sha256_pin(before))
         ):
             raise StagingError("existing legacy adoption receipt is invalid")
@@ -3032,6 +3072,8 @@ def adopt(staging_dir: str) -> List[str]:
         if not live:
             raise StagingError("legacy staging row has an unsafe live path")
         initial_paths.append(live)
+    if len({_filesystem_key(path) for path in initial_paths}) != len(initial_paths):
+        raise StagingError("managed skill and memory proposals target the same live file")
 
     with _adoption_locks(staging_dir, initial_paths):
         manifest = _load_manifest(staging_dir)
@@ -3060,7 +3102,7 @@ def adopt(staging_dir: str) -> List[str]:
             expected_file = (
                 "proposed_SKILL.md" if label == "skill" else "proposed_CLAUDE.md"
             )
-            expected_basename = "SKILL.md" if label == "skill" else "CLAUDE.md"
+            expected_basename = _legacy_target_basename(label, row)
             live = _safe_live_path(row.get("live_path"))
             expected_realpath = _safe_live_path(row.get("live_realpath"))
             live_pin = row.get("live_sha256")
@@ -3107,7 +3149,7 @@ def adopt(staging_dir: str) -> List[str]:
                     f"legacy {label} changed since staging; discard and restage"
                 )
             backup_path = (
-                os.path.join(staging_dir, "backup", expected_basename)
+                os.path.join(staging_dir, "backup", "SKILL.md" if label == "skill" else "CLAUDE.md")
                 if original is not None
                 else ""
             )

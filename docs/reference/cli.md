@@ -173,6 +173,9 @@ Common options for the nightly actions include:
 | `--lookback-hours N` | Initial transcript lookback; `0` scans all history |
 | `--max-sessions N` / `--max-tasks N` | Bound the harvested workload |
 | `--target-skill-path PATH` | Explicit skill document to stage/adopt |
+| `--target-document-path PATH` | Explicit Markdown instruction document; mutually exclusive with `--target-skill-path` |
+| `--memory-path PATH` | Secondary Markdown guidance target, project-relative or absolute (default: `CLAUDE.md`) |
+| `--no-memory` | Disable secondary guidance proposals for this invocation |
 | `--skill-root PATH` | Add a skill-resolution root; repeatable, with relative paths resolved below `--project` |
 | `--tasks-file PATH` | Replay a reviewed task JSON file instead of harvesting |
 | `--edit-budget N` | Maximum bounded edits for the night |
@@ -191,6 +194,45 @@ Fan-out resolves existing project-native `.agents/skills`, `.claude/skills`,
 roots. Use `--skill-root` for another integration-specific location. Configure
 the canonical `multi_skill_fanout` key to enable proposal fan-out;
 `multi_skill_report` remains a compatibility alias.
+
+### Discover and optimize instruction documents (fork extension)
+
+`skillopt-sleep discover --project PATH --json` inventories conventional project
+guidance (including `CLAUDE.local.md` and `AGENTS.md`), skills, native agents and
+commands with instruction frontmatter, and recursively linked Markdown prompts.
+It performs no harvesting, provider calls, state writes, staging, or adoption.
+`--project-only` narrows output to the project; `--match TEXT` filters paths and
+referring-document paths. No application name or stage list is built in.
+
+Every record carries `path`, `kind`, `discovered_from`, `writable`, and `reason`.
+Generated ownership markers, installed caches/runtimes, symlinks, hardlinks, and
+unknown external references are read-only candidates. An explicitly declared
+package root permits bounded read-only reference discovery. To optimize a shared
+tool, discover its editable source repository rather than changing generated
+copies; source locations are never guessed from names.
+
+Select relevant writable records, then use `--target-document-path PATH` to
+optimize one document. Use `--no-memory` for isolated guidance/prompt changes or
+`--memory-path PATH` for a separate personal or shared guidance document. Both
+targets must be safe Markdown paths and cannot identify the same file. Existing
+handwritten sections stay outside the managed learned block. Document runs have
+separate harvest cursors by primary target, memory target, source and scope.
+
+Use invoked transcript scope for project lessons and all scope for reusable
+shared-tool lessons. Each selected prompt requires its own bounded run and held-out
+evaluation; discovery does not spend model budget on every installed skill.
+Start with a mock dry-run. Real runs stage by default; after reviewing the exact
+night, use `adopt --project PATH --staging NIGHT --legacy`. Existing raw-byte pins,
+canonical identity checks, locks, immutable backups and rollback/recovery apply.
+Managed staging filenames and backup slots retain their historical names; the
+manifest and report identify the actual Markdown destinations. Older upstream
+adopters refuse nonstandard destinations rather than bypassing basename checks.
+
+Replay gains do not establish correctness of project source changes or entire
+pipelines. Run the project's or tool's real regression checks before releasing
+shared improvements. Scheduled runs remain explicit; the scheduler does not
+persist these new target flags, so configure `target_skill_path`,
+`document_targets: true`, and `memory_path` before scheduling document runs.
 
 The `mock` and `handoff` backends make no network calls. A real backend sends
 mining, replay, judging, and reflection prompts derived from harvested
