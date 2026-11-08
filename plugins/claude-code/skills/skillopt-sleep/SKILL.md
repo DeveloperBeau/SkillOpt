@@ -25,6 +25,32 @@ It synthesizes three ideas:
   reviewed before adoption.
 - **Agent sleep** — periodic background replay turns episodes into durable skill.
 
+## Discover targets first
+
+Before harvesting or optimizing, run the bundled runner with
+`discover --project "$PROJECT" --json`. Discovery reads local guidance,
+skills, and recursively linked pipeline/stage prompts without provider calls,
+transcript harvesting, state changes, or tool-specific paths. Use
+`--project-only` for project guidance and `--match` with the requested tool's
+actual name for shared instructions. Inspect each record's `discovered_from`.
+
+Select relevant `writable: true` records. Generated installations, symlinks,
+and external references remain read-only; shared improvements belong in an
+explicit editable source repository. Do not infer source location from a
+tool name or modify generated caches.
+
+Use `--target-document-path "$DISCOVERED_PATH" --no-memory` for a selected
+guidance/pipeline/stage document. To learn personal project rules alongside
+another target, replace `--no-memory` with
+`--memory-path "$DISCOVERED_LOCAL_GUIDANCE"`; `CLAUDE.local.md` is supported.
+Never select one file for both targets. Project learning uses
+`--scope invoked`; shared instructions can use cross-repo `--scope all`.
+Run each selected document separately with bounded `--max-sessions` and
+`--max-tasks`, starting with `dry-run --backend mock`. Stage real proposals,
+review each exact night, then `adopt --staging "$NIGHT" --legacy`.
+Replay scores do not establish source-code or whole-pipeline correctness;
+run the target tool's regression checks before releasing shared changes.
+
 ## When to use this skill
 
 Trigger when the user wants any of:
@@ -54,9 +80,11 @@ Prefer the `/skillopt-sleep` command. Under the hood it calls the bundled runner
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/sleep.sh" status                       # what's happened
+"${CLAUDE_PLUGIN_ROOT}/scripts/sleep.sh" discover --project "$(pwd)" --project-only --json
+# Select discovered writable targets and pass their target flags to the following previews/runs.
 "${CLAUDE_PLUGIN_ROOT}/scripts/sleep.sh" dry-run --project "$(pwd)"    # no-staging preview
 "${CLAUDE_PLUGIN_ROOT}/scripts/sleep.sh" run --project "$(pwd)"        # full cycle, stages a proposal
-"${CLAUDE_PLUGIN_ROOT}/scripts/sleep.sh" adopt --project "$(pwd)"      # apply staged proposal (with backup)
+"${CLAUDE_PLUGIN_ROOT}/scripts/sleep.sh" adopt --project "$(pwd)" --staging "$REVIEWED_NIGHT" --legacy
 ```
 
 - Default backend is `mock` (deterministic, **no API spend**) — good for trying the plumbing.
@@ -91,6 +119,9 @@ Installs a nightly cron entry. `unschedule --all` removes every managed entry.
 | `--max-sessions N` | derived | Cap harvested sessions; defaults to 3 × max tasks (120 with current defaults) |
 | `--max-tasks N` | 40 | Cap mined tasks |
 | `--target-skill-path PATH` | `~/.claude/skills/skillopt-sleep-learned/SKILL.md` | Explicit SKILL.md to evolve |
+| `--target-document-path PATH` | — | Explicit discovered Markdown instruction target |
+| `--memory-path PATH` | `CLAUDE.md` | Secondary project guidance, including CLAUDE.local.md |
+| `--no-memory` | off | Disable secondary memory proposals |
 | `--tasks-file PATH` | — | Reviewed TaskRecord JSON (skip harvest) |
 | `--progress` | off | Print phase progress to stderr |
 | `--auto-adopt` | off | Auto-adopt if gate passes |

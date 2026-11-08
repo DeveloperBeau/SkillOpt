@@ -13,11 +13,39 @@ only changes that improve a held-out score. Live files change only through
 explicit adoption or a user-requested `--auto-adopt`. There is no model-weight
 training.
 
-The current shared engine does **not** write `AGENTS.md`. For a Codex-visible
-result, always select a Codex skill explicitly with `--target-skill-path` (for
-example `.agents/skills/<name>/SKILL.md`). If project `CLAUDE.md` is not a
-desired secondary target, set `"evolve_memory": false` in
-`~/.skillopt-sleep/config.json` before running.
+This fork discovers project guidance, skills, and referenced pipeline/stage
+prompts without tool-specific names or paths. `AGENTS.md`, `CLAUDE.local.md`,
+and other Markdown instructions are supported explicit document targets.
+Edits stay inside managed learned blocks; original instructions remain.
+
+## Discover targets first
+
+Before harvesting or optimizing, run the bundled runner's
+`discover --project "$PROJECT" --json`. Discovery is read-only: no provider
+calls, transcript harvesting, scheduling, staging, or adoption. For project
+guidance use `--project-only`; for a requested shared tool use `--match` with
+its actual name from the request, then inspect `discovered_from` references.
+
+Select relevant records with `writable: true`. Generated installations and
+external references are read-only. To improve shared prompts, discover their
+editable source repository; do not guess its location or edit caches. No
+named tool, pipeline filename, or stage list is built into this workflow.
+
+Use `--target-document-path "$DISCOVERED_PATH" --no-memory` for one guidance
+or prompt document. To also learn personal project rules, use
+`--memory-path "$DISCOVERED_LOCAL_GUIDANCE"` instead of `--no-memory`.
+`CLAUDE.local.md` is a valid local target when discovered. Never use the same
+file as both primary and memory target. Codex consumes its own project
+instructions/skills; selecting Claude-local guidance alone does not make
+Codex read it.
+
+Project learning uses `--scope invoked`. Shared-tool learning can use
+`--scope all` while targeting editable source prompts. Optimize selected
+documents separately; bound each run with `--max-sessions` and `--max-tasks`.
+Start with `dry-run --backend mock`. Real runs stage proposals by default;
+review each exact staging directory before `adopt --staging "$NIGHT" --legacy`.
+Validation scores measure instruction replay, not actual source-code fixes or
+whole-pipeline correctness; run the tool's regression checks before release.
 
 ## When to use
 
@@ -54,6 +82,8 @@ finds the engine and a Python >= 3.10 automatically.
 # point at the repo if it isn't auto-detected from CWD:
 export SKILLOPT_SLEEP_REPO=/path/to/SkillOpt
 TARGET_SKILL=.agents/skills/example/SKILL.md
+bash "$SKILLOPT_SLEEP_REPO/plugins/run-sleep.sh" discover --project "$(pwd)" --project-only --json
+# Set TARGET_SKILL from a relevant writable discovery record before harvesting.
 bash "$SKILLOPT_SLEEP_REPO/plugins/run-sleep.sh" status --project "$(pwd)"
 bash "$SKILLOPT_SLEEP_REPO/plugins/run-sleep.sh" harvest --project "$(pwd)" \
   --source codex --target-skill-path "$TARGET_SKILL"
@@ -63,7 +93,7 @@ bash "$SKILLOPT_SLEEP_REPO/plugins/run-sleep.sh" run --project "$(pwd)" \
   --source codex --target-skill-path "$TARGET_SKILL" --backend codex \
   --max-sessions 5 --max-tasks 3 --progress
 bash "$SKILLOPT_SLEEP_REPO/plugins/run-sleep.sh" status --project "$(pwd)"
-bash "$SKILLOPT_SLEEP_REPO/plugins/run-sleep.sh" adopt --project "$(pwd)" --legacy
+bash "$SKILLOPT_SLEEP_REPO/plugins/run-sleep.sh" adopt --project "$(pwd)" --staging "$REVIEWED_NIGHT" --legacy
 ```
 
 For a fan-out night, select reviewed proposals with repeatable
@@ -81,7 +111,7 @@ $env:SKILLOPT_SLEEP_REPO = "C:\path\to\SkillOpt-Sleep"
 powershell -File "$env:SKILLOPT_SLEEP_REPO\plugins\run-sleep.ps1" status --project "$(pwd)"
 ```
 
-Actions are `status`, `harvest`, `dry-run`, `run`, `adopt`, `schedule`, and `unschedule`.
+Actions are `discover`, `status`, `harvest`, `dry-run`, `run`, `adopt`, `schedule`, and `unschedule`.
 
 - Default backend is `mock`, which is deterministic and spends no API budget.
 - `--backend codex` uses the user's Codex budget for model-driven optimization.
@@ -140,13 +170,15 @@ without `crontab`, `schedule` prints a line for manual installation.
 ### Memory consolidation
 
 The shared sleep cycle consolidates project **memory** (`CLAUDE.md`) and the
-selected **skill** (`SKILL.md`) by default. It does not update `AGENTS.md`.
+selected **skill** (`SKILL.md`) by default. Select discovered Markdown targets
+with `--target-document-path` and `--memory-path`; `--no-memory` disables the
+secondary target without changing global config.
 Each target is independently toggleable through `evolve_memory` /
 `evolve_skill`, and both are gated by the same held-out validation score.
 
 ## Steps
 
-1. Run the requested action; capture stdout.
+1. For learning requests, discover/select targets first as above. Run the requested action; capture stdout.
 2. For `dry-run` and `run`, report the held-out baseline -> candidate score,
    gate action, task count, session count, and exact proposed edits.
 3. If a staging directory is printed, read `report.md` before summarizing.
