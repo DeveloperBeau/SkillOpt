@@ -158,10 +158,12 @@ Common options for the nightly actions include:
 |---|---|
 | `--project PATH` | Project used for transcript scope, targets, state, and staging (default: current directory) |
 | `--scope invoked\|all` | Harvest this project or all projects |
-| `--source claude\|codex\|copilot\|cursor\|pi\|opencode\|auto` | Transcript source; `auto` keeps Codex-then-Claude precedence and does not select Copilot, Cursor, Pi, or OpenCode |
-| `--backend mock\|claude\|codex\|copilot\|cursor\|pi\|opencode\|handoff\|azure_openai` | Replay/optimizer backend |
+| `--source claude\|codex\|copilot\|cursor\|grok\|pi\|opencode\|auto` | Transcript source; `auto` keeps Codex-then-Claude precedence and does not select Copilot, Cursor, Grok, Pi, or OpenCode |
+| `--backend mock\|claude\|codex\|copilot\|cursor\|grok\|pi\|opencode\|handoff\|azure_openai` | Replay/optimizer backend |
 | `--model NAME` | Backend-specific model override |
 | `--cursor-home PATH` | Override `~/.cursor` for Cursor transcript harvesting |
+| `--grok-home PATH` | Override `~/.grok` for Grok session harvesting |
+| `--grok-path PATH` | Path to the installed `grok` binary |
 | `--pi-home PATH` | Parent directory containing Pi's `agent/sessions` tree (default: `~/.pi`) |
 | `--vscode-workspace-storage PATH` | Override VS Code's `User/workspaceStorage` root for Copilot transcript harvesting |
 | `--cursor-path PATH` | Path to the installed Cursor Agent CLI |
@@ -392,6 +394,25 @@ The managed scheduler stores the backend but not `--source`, `--opencode-db`,
 `"opencode_tool_replay": true` only when the scheduled run should enable
 tool-aware replay. Use absolute database and executable paths, and verify
 OpenCode access when the scheduled run uses the backend.
+
+### Grok source and backend
+
+`--source grok` reads Grok session files under `~/.grok/sessions`.
+The harvester keeps user text, assistant text, and tool names.
+It does not copy system prompts, tool arguments, or tool output.
+It removes known secret patterns. Removal is not a guarantee.
+`--source auto` does not select Grok.
+
+`--backend grok` runs `grok` with `--prompt-file` and `--output-format json`.
+The sandbox profile for ordinary calls is `read-only`.
+Use `--grok-home` when the sessions are not in `~/.grok`.
+Use `--grok-path` when `grok` is not on `PATH`.
+
+```bash
+skillopt-sleep run --project "$(pwd)" \
+  --source grok --backend grok \
+  --max-sessions 5 --max-tasks 3 --progress
+```
 
 ### Cursor source and backend
 

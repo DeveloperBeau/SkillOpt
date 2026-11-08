@@ -142,6 +142,7 @@ def _make_model_key(cfg: SleepConfig) -> str:
             opencode_tool_replay=cfg.get("opencode_tool_replay", False),
             azure_endpoint=cfg.get("azure_endpoint", ""),
             project_dir=cfg.get("invoked_project", "") or os.getcwd(),
+            grok_path=cfg.get("grok_path", ""),
         )
     except Exception:
         backend = str(cfg.get("backend", "mock") or "mock")
@@ -746,6 +747,7 @@ def run_sleep_cycle(
         azure_endpoint=cfg.get("azure_endpoint", ""),
         preferences=cfg.get("preferences", ""),
         project_dir=project,
+        grok_path=cfg.get("grok_path", ""),
     )
     _check_model_change(cfg, state, backend)  # F16: warn if model changed between nights
     _claude_isolation_modes(backend, reset=True)

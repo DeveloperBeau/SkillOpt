@@ -69,8 +69,8 @@ skillopt_schedule project=<dir> hour=3 minute=17 backend=<codex>
 | Parameter | Default | Meaning |
 |---|---|---|
 | `project` | config or cwd | project directory to evolve |
-| `backend` | `mock` | `mock\|claude\|codex\|copilot\|cursor\|pi\|opencode\|handoff\|azure_openai` (mock = no model calls) |
-| `source` | config | transcript source: `claude\|codex\|copilot\|cursor\|pi\|opencode\|auto` |
+| `backend` | `mock` | `mock\|claude\|codex\|copilot\|cursor\|grok\|pi\|opencode\|handoff\|azure_openai` (mock = no model calls) |
+| `source` | config | transcript source: `claude\|codex\|copilot\|cursor\|grok\|pi\|opencode\|auto` |
 | `model` | backend default | replay model override |
 | `maxTasks` | 40 | mined-task cap |
 | `preferences` | empty | house rules for the reflection prior (e.g. "always use async/await") |

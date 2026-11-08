@@ -2739,6 +2739,219 @@ class AzureResponsesBackend(AzureOpenAIBackend):
         return ""
 
 
+def resolve_grok_path(explicit: str = "") -> str:
+    """Find the ``grok`` binary. An explicit path wins, then the env override."""
+    if explicit:
+        return explicit
+    env = os.environ.get("SKILLOPT_SLEEP_GROK_PATH")
+    if env:
+        return os.path.expanduser(env)
+    found = shutil.which("grok")
+    return found or "grok"
+
+
+def _grok_text_from_stdout(stdout: str) -> Tuple[str, str]:
+    """Return ``(text, error)`` from a ``grok --output-format json`` payload.
+
+    The text is the final answer. Tool arguments and stream chunks are not
+    copied. An error string is short and does not include the prompt file.
+    """
+    raw = (stdout or "").strip()
+    if not raw:
+        return "", "grok returned empty output"
+    data: Any = None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        for line in reversed(raw.splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                data = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    if not isinstance(data, dict):
+        return "", "grok json output was not an object"
+    if data.get("is_error") is True or data.get("type") == "error":
+        message = data.get("error") or data.get("result") or data.get("text") or "grok reported an error"
+        return "", str(message)[:500]
+    text = data.get("text")
+    if not isinstance(text, str) or not text.strip():
+        result = data.get("result")
+        text = result if isinstance(result, str) else ""
+    return text.strip(), ""
+
+
+class GrokCliBackend(CliBackend):
+    """Drives headless ``grok`` and reads ``--output-format json``.
+
+    The prompt goes to a file, not argv. Ordinary calls use the ``read-only``
+    sandbox. The prompt starts with ``GROK_REPLAY_SENTINEL`` so harvest skips
+    the session this call writes.
+    """
+
+    name = "grok"
+    _AUTH_MARKERS = (
+        "Not logged in",
+        "not logged in",
+        "grok login",
+        "Please log in",
+        "401 Unauthorized",
+        "invalid_api_key",
+        "authentication failed",
+    )
+
+    def __init__(
+        self,
+        model: str = "",
+        grok_path: str = "",
+        timeout: int = 240,
+        project_dir: str = "",
+    ) -> None:
+        super().__init__(
+            model=model or os.environ.get("SKILLOPT_SLEEP_GROK_MODEL", ""),
+            timeout=timeout,
+        )
+        self.grok_path = resolve_grok_path(grok_path)
+        self.project_dir = (
+            os.path.abspath(os.path.expanduser(project_dir)) if project_dir else ""
+        )
+
+    def _run_grok(self, prompt: str, *, cwd: str, sandbox: str) -> Tuple[str, str]:
+        """Run one headless call. Return ``(text, error)``."""
+        from skillopt_sleep.harvest_grok import GROK_REPLAY_SENTINEL
+
+        prompt_path = tempfile.NamedTemporaryFile(
+            prefix="grok_prompt_", suffix=".txt", delete=False
+        ).name
+        try:
+            with open(prompt_path, "w", encoding="utf-8") as handle:
+                handle.write(GROK_REPLAY_SENTINEL + "\n\n" + prompt)
+            cmd = [
+                self.grok_path,
+                "--prompt-file", prompt_path,
+                "--output-format", "json",
+                "--sandbox", sandbox,
+                "--no-auto-update",
+            ]
+            if cwd:
+                cmd += ["--cwd", cwd]
+            if self.model:
+                cmd += ["-m", self.model]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    creationflags=_NO_WINDOW,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=self.timeout,
+                    cwd=cwd or None,
+                )
+            except subprocess.TimeoutExpired:
+                return "", f"grok timed out after {self.timeout}s"
+            except Exception as exc:  # noqa: BLE001
+                return "", f"grok failed: {exc}"
+            text, parse_error = _grok_text_from_stdout(proc.stdout or "")
+            if text:
+                return text, ""
+            stderr = (proc.stderr or "").strip()
+            if proc.returncode != 0:
+                detail = stderr or parse_error or f"exit {proc.returncode}"
+                return "", f"grok exited {proc.returncode}: {detail}"[:500]
+            if parse_error and parse_error != "grok returned empty output":
+                return "", parse_error[:500]
+            return "", stderr[:500] or parse_error or "grok returned no text"
+        finally:
+            try:
+                os.unlink(prompt_path)
+            except OSError:
+                pass
+
+    def _call_once(self, prompt: str, *, max_tokens: int = 1024) -> str:
+        text, error = self._run_grok(
+            prompt, cwd=self.project_dir, sandbox="read-only"
+        )
+        self.last_call_error = error
+        return text
+
+    def _call(self, prompt: str, *, max_tokens: int = 1024, retries: int = 3) -> str:
+        """Retry a transient empty reply. Do not retry a login failure."""
+        import logging
+        import random as _r
+        import time as _t
+
+        out = ""
+        for attempt in range(max(1, retries)):
+            self.last_call_error = ""
+            out = self._call_once(prompt, max_tokens=max_tokens)
+            if out:
+                return out
+            err = self.last_call_error or ""
+            if any(marker in err for marker in self._AUTH_MARKERS):
+                from skillopt_sleep.staging import redact_secrets
+                logging.getLogger("skillopt_sleep").error(
+                    "grok auth error — login required (`grok login`): %s",
+                    redact_secrets(err[:200]),
+                )
+                break
+            if attempt < retries - 1:
+                _t.sleep(min(6.0, (2 ** attempt) * 0.5) + _r.random() * 0.3)
+        return out
+
+    def attempt_with_tools(self, task, skill, memory, tools):
+        """Expose shell shims in a temp directory and record the names Grok runs."""
+        self._reset_call_delta()
+        import stat
+
+        work = tempfile.mkdtemp(prefix="skillopt_sleep_groktools_")
+        calllog = os.path.join(work, "_tool_calls.log")
+        tool_names = tools or ["search"]
+        try:
+            for tname in tool_names:
+                shim = os.path.join(work, tname)
+                with open(shim, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        "#!/usr/bin/env bash\n"
+                        f'echo "{tname}" >> "{calllog}"\n'
+                        'echo "(search results: 3 relevant notes found; use them to answer)"\n'
+                    )
+                os.chmod(shim, os.stat(shim).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            tool_hint = (
+                "Shell tools are available in the working directory: "
+                + ", ".join(f"./{t}" for t in tool_names)
+                + ". When the skill says to look something up or search before "
+                "answering, you MUST actually run the tool (e.g. `./"
+                + tool_names[0]
+                + " \"query\"`) before giving your final answer."
+            )
+            prompt = (
+                "Complete the task. Apply the skill and memory rules EXACTLY, "
+                "including any rule about searching before answering.\n\n"
+                f"{tool_hint}\n\n# Skill\n{skill or '(none)'}\n\n# Memory\n{memory or '(none)'}\n\n"
+                f"# Task\n{task.intent}\n\n{task.context_excerpt}\n\nReturn ONLY the final answer."
+            )
+            text, error = self._run_grok(prompt, cwd=work, sandbox="workspace")
+            self.last_call_error = error
+            called: List[str] = []
+            try:
+                with open(calllog, encoding="utf-8") as handle:
+                    for line in handle:
+                        name = line.strip()
+                        if name and name not in called:
+                            called.append(name)
+            except OSError:
+                pass
+            if not self._thread_local.charged_in_call:
+                self._record_cost(prompt, text)
+            return text, called
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+
 def get_backend(
     name: str,
     *,
@@ -2751,6 +2964,7 @@ def get_backend(
     opencode_tool_replay: bool = False,
     azure_endpoint: str = "",
     project_dir: str = "",
+    grok_path: str = "",
 ) -> Backend:
     n = (name or "mock").strip().lower()
     if n in {"pi", "pi_cli", "pi_coding_agent", "pi-coding-agent"}:
@@ -2759,6 +2973,8 @@ def get_backend(
         return ClaudeCliBackend(model=model, claude_path=claude_path)
     if n in {"codex", "codex_cli", "openai_codex"}:
         return CodexCliBackend(model=model, codex_path=codex_path, project_dir=project_dir)
+    if n in {"grok", "grok_cli", "grok-cli"}:
+        return GrokCliBackend(model=model, grok_path=grok_path, project_dir=project_dir)
     if n in {"azure", "azure_openai", "aoai"}:
         return AzureOpenAIBackend(deployment=model, endpoint=azure_endpoint)
     if n in {"azure-responses", "azure_responses", "aoai-responses", "responses"}:
@@ -2785,7 +3001,7 @@ def get_backend(
         return MockBackend()
     raise ValueError(
         f"Unknown backend: {name!r}. Supported backends are: 'azure', 'azure-responses', "
-        "'claude', 'codex', 'copilot', 'cursor', 'handoff', 'mock', 'opencode', 'pi'."
+        "'claude', 'codex', 'copilot', 'cursor', 'grok', 'handoff', 'mock', 'opencode', 'pi'."
     )
 
 
@@ -2805,6 +3021,7 @@ def build_backend(
     azure_endpoint: str = "",
     preferences: str = "",
     project_dir: str = "",
+    grok_path: str = "",
 ) -> Backend:
     """Build a single or dual backend.
 
@@ -2825,6 +3042,7 @@ def build_backend(
             opencode_tool_replay=opencode_tool_replay,
             azure_endpoint=azure_endpoint,
             project_dir=project_dir,
+            grok_path=grok_path,
         )
         be.preferences = preferences
         return be
@@ -2832,12 +3050,12 @@ def build_backend(
                       codex_path=codex_path, pi_path=pi_path, cursor_path=cursor_path,
                       opencode_path=opencode_path, opencode_tool_replay=opencode_tool_replay,
                       azure_endpoint=azure_endpoint,
-                      project_dir=project_dir)
+                      project_dir=project_dir, grok_path=grok_path)
     opt = get_backend(optimizer_backend or backend, model=optimizer_model or model,
                       codex_path=codex_path, pi_path=pi_path, cursor_path=cursor_path,
                       opencode_path=opencode_path, opencode_tool_replay=opencode_tool_replay,
                       azure_endpoint=azure_endpoint,
-                      project_dir=project_dir)
+                      project_dir=project_dir, grok_path=grok_path)
     opt.preferences = preferences  # reflect runs on the optimizer
     dual = DualBackend(target=tgt, optimizer=opt)
     dual.preferences = preferences

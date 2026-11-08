@@ -23,6 +23,7 @@ CLAUDE_HOME = os.path.expanduser("~/.claude")
 CODEX_HOME = os.path.expanduser("~/.codex")
 PI_HOME = os.path.expanduser("~/.pi")
 CURSOR_HOME = os.path.expanduser("~/.cursor")
+GROK_HOME = os.path.expanduser("~/.grok")
 
 
 DEFAULTS: Dict[str, Any] = {
@@ -31,10 +32,11 @@ DEFAULTS: Dict[str, Any] = {
     "codex_home": CODEX_HOME,
     "pi_home": PI_HOME,
     "cursor_home": CURSOR_HOME,
+    "grok_home": GROK_HOME,
     "vscode_workspace_storage": "",  # "" => auto-detect platform defaults
     "copilot_cli_session_store": "",  # "" => ~/.copilot/session-store.db
     "opencode_db": "",  # "" => OPENCODE_DB or the OpenCode XDG data path
-    # Explicit sources also include copilot, copilot_cli, cursor, pi, and opencode.
+    # Explicit sources also include copilot, copilot_cli, cursor, grok, pi, and opencode.
     # ``auto`` keeps the established Codex-then-Claude precedence.
     "transcript_source": "claude",
     "projects": "invoked",        # "invoked" | "all" | [list of abs paths]
@@ -47,7 +49,7 @@ DEFAULTS: Dict[str, Any] = {
     "val_fraction": 0.34,         # real tasks reserved to gate updates
     "test_fraction": 0.0,         # real tasks reserved as the final held-out measure
     # ── optimizer ──────────────────────────────────────────────────────────
-    "backend": "mock",            # "mock" | "claude" | "codex" | "copilot" | "cursor" | "pi" | "opencode"
+    "backend": "mock",            # "mock" | "claude" | "codex" | "copilot" | "cursor" | "grok" | "pi" | "opencode"
     "model": "",                  # backend-specific; "" => backend default
     # Dual-backend split (both empty => single backend above plays all roles).
     # target = the model whose skill is deployed (runs `attempt` rollouts);
@@ -61,6 +63,7 @@ DEFAULTS: Dict[str, Any] = {
     "codex_path": "",             # "" => auto-detect the real @openai/codex binary
     "pi_path": "",                # "" => use `pi` on PATH
     "cursor_path": "",            # "" => auto-detect the Cursor Agent CLI
+    "grok_path": "",              # "" => SKILLOPT_SLEEP_GROK_PATH, then `grok` on PATH
     "opencode_path": "",          # "" => SKILLOPT_SLEEP_OPENCODE_PATH, then `opencode` on PATH/PATHEXT
     "opencode_tool_replay": False,  # explicit opt-in for OpenCode tool-aware replay
     "edit_budget": 4,             # textual learning rate (max edits/night)
@@ -146,6 +149,11 @@ class SleepConfig:
     def pi_sessions_dir(self) -> str:
         pi_home = os.path.abspath(os.path.expanduser(str(self.data["pi_home"])))
         return os.path.join(pi_home, "agent", "sessions")
+
+    @property
+    def grok_sessions_dir(self) -> str:
+        grok_home = os.path.abspath(os.path.expanduser(str(self.data.get("grok_home") or GROK_HOME)))
+        return os.path.join(grok_home, "sessions")
 
     @property
     def cursor_projects_dir(self) -> str:

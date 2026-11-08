@@ -14,8 +14,8 @@ Common flags:
     --max-tasks N       cap mined tasks per run
     --target-skill-path PATH explicit live SKILL.md to stage/adopt
     --tasks-file PATH   reviewed TaskRecord JSON file to replay instead of harvesting
-    --backend mock|claude|codex|copilot|cursor|pi|opencode|handoff|azure_openai
-    --source claude|codex|copilot|copilot_cli|cursor|pi|opencode|auto
+    --backend mock|claude|codex|copilot|cursor|grok|pi|opencode|handoff|azure_openai
+    --source claude|codex|copilot|copilot_cli|cursor|grok|pi|opencode|auto
     --vscode-workspace-storage PATH
     --copilot-cli-session-store PATH
     --opencode-db PATH
@@ -100,13 +100,14 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--project", default="")
     p.add_argument("--scope", default="", choices=["", "all", "invoked"])
     p.add_argument("--backend", default="",
-                   choices=["", "mock", "claude", "codex", "copilot", "cursor", "pi",
+                   choices=["", "mock", "claude", "codex", "copilot", "cursor", "grok", "pi",
                             "opencode", "handoff", "azure_openai"])
     p.add_argument("--model", default="")
     p.add_argument("--codex-path", default="", help="path to the real @openai/codex binary")
     p.add_argument("--cursor-path", default="", help="path to the Cursor Agent CLI")
     p.add_argument("--pi-path", default="", help="path to the Pi coding-agent CLI")
     p.add_argument("--opencode-path", default="", help="path to the OpenCode CLI")
+    p.add_argument("--grok-path", default="", help="path to the grok binary")
     p.add_argument(
         "--opencode-tool-replay",
         action="store_true",
@@ -115,9 +116,10 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--claude-home", default="", help="override ~/.claude (also isolates state)")
     p.add_argument("--codex-home", default="", help="override ~/.codex for archived session harvest")
     p.add_argument("--cursor-home", default="", help="override ~/.cursor for Cursor session harvest")
+    p.add_argument("--grok-home", default="", help="override ~/.grok for Grok session harvest")
     p.add_argument("--pi-home", default="", help="override ~/.pi for Pi session harvest")
     p.add_argument("--source", default="",
-                   choices=["", "claude", "codex", "copilot", "copilot_cli", "cursor", "pi", "opencode", "auto"],
+                   choices=["", "claude", "codex", "copilot", "copilot_cli", "cursor", "grok", "pi", "opencode", "auto"],
                    help="session transcript source")
     p.add_argument("--vscode-workspace-storage", default="",
                    help="override VS Code User/workspaceStorage root for copilot source")
@@ -177,6 +179,8 @@ def _cfg_from_args(args, task_meta: Dict[str, Any] | None = None) -> Any:
         overrides["cursor_path"] = os.path.abspath(os.path.expanduser(args.cursor_path))
     if getattr(args, "opencode_path", ""):
         overrides["opencode_path"] = os.path.abspath(os.path.expanduser(args.opencode_path))
+    if getattr(args, "grok_path", ""):
+        overrides["grok_path"] = os.path.abspath(os.path.expanduser(args.grok_path))
     if getattr(args, "opencode_tool_replay", False):
         overrides["opencode_tool_replay"] = True
     if getattr(args, "claude_home", ""):
@@ -187,6 +191,8 @@ def _cfg_from_args(args, task_meta: Dict[str, Any] | None = None) -> Any:
         overrides["pi_home"] = os.path.abspath(os.path.expanduser(args.pi_home))
     if getattr(args, "cursor_home", ""):
         overrides["cursor_home"] = os.path.abspath(os.path.expanduser(args.cursor_home))
+    if getattr(args, "grok_home", ""):
+        overrides["grok_home"] = os.path.abspath(os.path.expanduser(args.grok_home))
     if getattr(args, "source", ""):
         overrides["transcript_source"] = args.source
     if getattr(args, "vscode_workspace_storage", ""):

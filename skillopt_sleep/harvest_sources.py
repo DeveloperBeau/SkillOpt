@@ -6,6 +6,7 @@ from typing import Optional
 from skillopt_sleep.harvest import harvest
 from skillopt_sleep.harvest_codex import harvest_codex
 from skillopt_sleep.harvest_copilot import harvest_copilot
+from skillopt_sleep.harvest_grok import harvest_grok
 from skillopt_sleep.harvest_copilot_cli import harvest_copilot_cli
 from skillopt_sleep.harvest_cursor import harvest_cursor
 from skillopt_sleep.harvest_opencode import harvest_opencode
@@ -18,6 +19,7 @@ SUPPORTED_SOURCES = (
     "copilot",
     "copilot_cli",
     "cursor",
+    "grok",
     "pi",
     "opencode",
     "auto",
@@ -85,6 +87,14 @@ def harvest_for_config(
     if source == "copilot_cli":
         return harvest_copilot_cli(
             cfg.copilot_cli_session_store,
+            scope=scope,
+            invoked_project=invoked_project,
+            since_iso=since_iso,
+            limit=limit,
+        )
+    if source == "grok":
+        return harvest_grok(
+            cfg.grok_sessions_dir,
             scope=scope,
             invoked_project=invoked_project,
             since_iso=since_iso,

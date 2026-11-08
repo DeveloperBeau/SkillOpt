@@ -119,6 +119,9 @@ Actions are `discover`, `status`, `harvest`, `dry-run`, `run`, `adopt`, `schedul
   broader improvement; results depend on the tasks, model, and checks.
 - `--source codex` reads Codex Desktop archived sessions from `~/.codex/archived_sessions`;
   use `--codex-home /path/to/.codex` if the archive lives elsewhere.
+- `--source grok` reads Grok sessions from `~/.grok/sessions`.
+  `--backend grok` runs headless `grok` with `--output-format json`.
+  Use `--grok-home` or `--grok-path` when those defaults are wrong.
 - `--target-skill-path` is required for a Codex skill target. Without it, the
   shared default is a Claude-managed skill under `~/.claude/skills/`, not an
   `.agents` skill.
@@ -145,6 +148,7 @@ without `crontab`, `schedule` prints a line for manual installation.
 - `--backend mock` — deterministic, no API spend (default)
 - `--backend claude` — uses the Claude CLI
 - `--backend codex` — uses the Codex CLI
+- `--backend grok` — uses the Grok CLI (`grok --prompt-file`, `--source grok` for sessions)
 - `--backend copilot` — uses the GitHub Copilot CLI
 - `--backend handoff` — emits prompt/answer files for an interactive session
 - `--backend azure_openai` — uses the configured Azure OpenAI endpoint
